@@ -42,14 +42,17 @@ class ThreadManager:
     def create_threads(
         self,
         target_func: Optional[Callable] = None,
-        task_args: Optional[tuple] = None
+        task_args: Optional[tuple] = None,
+        per_thread_args: Optional[List[tuple]] = None
     ) -> List[threading.Thread]:
         """
         Creates N worker threads using the standard threading library.
 
         Args:
             target_func: Function to execute on each thread. If None, uses default_sample_task.
-            task_args: Optional arguments tuple to pass to target_func.
+            task_args: Optional arguments tuple passed to ALL threads (legacy behaviour).
+            per_thread_args: Optional list of argument tuples, one per thread.
+                             Takes precedence over task_args when provided.
 
         Returns:
             List of created threading.Thread objects.
@@ -62,9 +65,10 @@ class ThreadManager:
 
         for i in range(self.num_threads):
             name = f"Worker-{i}"
-            
-            # Pass thread index as first argument if using default_sample_task
-            if target_func is default_sample_task:
+
+            if per_thread_args is not None:
+                args = per_thread_args[i]
+            elif target_func is default_sample_task:
                 args = (i,) if task_args is None else (i, *task_args)
             else:
                 args = task_args if task_args is not None else ()
@@ -106,18 +110,44 @@ class ThreadManager:
     def display_thread_summary(self) -> None:
         """
         Prints a neat summary table of all managed worker threads.
+        Shows affinity metadata when available in thread_info.
         """
-        print("-" * 60)
-        print(f"          WORKER THREAD SUMMARY ({len(self.threads)} Threads)")
-        print("-" * 60)
-        print(f"{'Index':<8} | {'Thread Name':<15} | {'Native OS TID':<15} | {'Status':<10}")
-        print("-" * 60)
-        for info in self.thread_info:
-            t = info["thread_obj"]
-            native_id = getattr(t, "native_id", "N/A")
-            status = info["status"]
-            print(f"{info['index']:<8} | {info['name']:<15} | {str(native_id):<15} | {status:<10}")
-        print("-" * 60)
+        has_affinity = any("assigned_cores" in info for info in self.thread_info)
+
+        print("-" * 75)
+        if has_affinity:
+            print(f"     WORKER THREAD SUMMARY ({len(self.threads)} Threads)")
+        else:
+            print(f"          WORKER THREAD SUMMARY ({len(self.threads)} Threads)")
+        print("-" * 75)
+
+        if has_affinity:
+            print(
+                f"{'Index':<7} | {'Thread Name':<13} | {'Native OS TID':<14} | "
+                f"{'Assigned Cores':<16} | {'Affinity':<12} | {'Status':<10}"
+            )
+            print("-" * 75)
+            for info in self.thread_info:
+                t = info["thread_obj"]
+                native_id = getattr(t, "native_id", "N/A")
+                cores = info.get("assigned_cores", [])
+                affinity = info.get("affinity_status", "N/A")
+                core_str = ", ".join(str(c) for c in cores) if cores else "OS"
+                print(
+                    f"{info['index']:<7} | {info['name']:<13} | "
+                    f"{str(native_id):<14} | {core_str:<16} | "
+                    f"{affinity:<12} | {info['status']:<10}"
+                )
+        else:
+            print(f"{'Index':<8} | {'Thread Name':<15} | {'Native OS TID':<15} | {'Status':<10}")
+            print("-" * 75)
+            for info in self.thread_info:
+                t = info["thread_obj"]
+                native_id = getattr(t, "native_id", "N/A")
+                status = info["status"]
+                print(f"{info['index']:<8} | {info['name']:<15} | {str(native_id):<15} | {status:<10}")
+
+        print("-" * 75)
 
 
 if __name__ == "__main__":
